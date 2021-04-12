@@ -1,0 +1,160 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: pihole
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pihole-ftl.conf
+  namespace: pihole
+data:
+  pihole-FTL.conf: |
+    MAXDBDAYS=365
+    LOGFILE=/var/log/pihole/pihole-FTL.log
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: pihole
+  name: pihole
+  namespace: pihole
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: pihole
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: pihole
+    spec:
+      containers:
+      - env:
+        - name: TZ
+          value: America/New_York
+        - name: WEBPASSWORD
+          value: dIcKiNECTioN
+        - name: PIHOLE_DNS_
+          value: 192.168.1.162
+        - name: ADMIN_EMAIL
+          value: macqueenrs@gmail.com
+        - name: TEMPERATUREUNIT
+          value: f
+
+        image: pihole/pihole:latest
+        imagePullPolicy: IfNotPresent
+        name: pihole
+        ports:
+        - name: dns-tcp
+          containerPort: 53
+          protocol: TCP
+        - name: dns-udp
+          containerPort: 53
+          protocol: UDP
+        - name: dchp
+          containerPort: 67
+          protocol: UDP
+        - name: http
+          containerPort: 80
+          protocol: TCP
+        - name: https
+          containerPort: 443
+          protocol: TCP
+        resources:
+          requests:
+            cpu: "20m"
+            memory: "512Mi"
+          limits:
+            cpu: "250m"
+            memory: "896Mi"
+        readinessProbe:
+          exec:
+            command: ['dig', '@127.0.0.1', 'google.com']
+          timeoutSeconds: 20
+          initialDelaySeconds: 5
+          periodSeconds: 60
+        livenessProbe:
+          tcpSocket:
+            port: dns-tcp
+          initialDelaySeconds: 15
+          periodSeconds: 30
+        volumeMounts:
+        - name: etc-pihole
+          mountPath: /etc/pihole
+        - name: etc-dnsmasq
+          mountPath: /etc/dnsmasq.d
+        - name: var-log
+          mountPath: /var/log
+        - name: var-log-lighttpd
+          mountPath: /var/log/lighttpd
+        - name: ftlconf
+          mountPath: /etc/pihole/pihole-FTL.conf
+          subPath: pihole-FTL.conf
+        
+      restartPolicy: Always
+      volumes:
+      - name: etc-pihole
+        emptyDir:
+          medium: Memory
+      - name: etc-dnsmasq
+        emptyDir:
+          medium: Memory
+      - name: var-log
+        emptyDir:
+          medium: Memory
+      - name: var-log-lighttpd
+        emptyDir:
+          medium: Memory
+      - name: ftlconf
+        configMap:
+          name: pihole-ftl.conf
+          items:
+            - key: pihole-FTL.conf
+              path: pihole-FTL.conf
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: pihole-udp
+  namespace: pihole
+  annotations:
+    metallb.universe.tf/allow-shared-ip: dns
+spec:
+  selector:
+    app: pihole
+  ports:
+  - protocol: UDP
+    port: 53
+    name: dnsudp
+    targetPort: 53
+  type: LoadBalancer
+  loadBalancerIP: 192.168.0.4
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: pihole-tcp
+  namespace: pihole
+  annotations:
+    metallb.universe.tf/allow-shared-ip: dns
+spec:
+  selector:
+    app: pihole
+  ports:
+  - protocol: TCP
+    port: 53
+    name: dnstcp
+    targetPort: 53
+  - protocol: TCP
+    port: 80
+    name: http
+    targetPort: 80
+  type: LoadBalancer
+  loadBalancerIP: 192.168.0.4
